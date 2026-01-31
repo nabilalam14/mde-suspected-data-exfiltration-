@@ -1,28 +1,34 @@
-# Threat Hunting Lab: mde-suspected-data-exfiltration-
-
-## Overview
-This project documents a threat hunting investigation conducted in **Microsoft Defender for Endpoint (MDE)** to assess whether a potentially disgruntled employee was staging data for exfiltration. The hunt focused on detecting suspicious file archiving activity, process execution, and correlated network behavior.
-
-No confirmed data exfiltration was identified; however, multiple indicators of **data staging** were observed.
+# Microsoft Defender for Endpoint Threat Hunting  
+## Suspected Internal Data Staging & Exfiltration Preparation
 
 ---
 
-## Scenario Summary
-An employee under a Performance Improvement Plan (PIP) raised concerns about potential insider threat activity. The employee had local administrator privileges and unrestricted application access. The goal of this hunt was to determine whether sensitive data was being compressed and prepared for exfiltration.
+## 📌 Overview
+This project documents a **threat hunting investigation** conducted using **Microsoft Defender for Endpoint (MDE)** to assess potential insider threat activity involving data staging and preparation for exfiltration.
+
+The investigation focused on correlating **file creation**, **process execution**, and **network activity** to determine whether sensitive data was being compressed and prepared for removal from the environment.
 
 ---
 
-## Data Sources
-- `DeviceFileEvents`
-- `DeviceProcessEvents`
-- `DeviceNetworkEvents`
+## 🧠 Scenario Summary
+An employee with **local administrator privileges** was placed on a Performance Improvement Plan (PIP), raising concerns of potential malicious insider behavior. The employee had unrestricted application access and the capability to install utilities and execute scripts.
+
+**Objective:**  
+Determine whether data was being archived and staged for potential exfiltration.
 
 ---
 
-## Timeline Summary & Findings
+## 📊 Data Sources
+- DeviceFileEvents  
+- DeviceProcessEvents  
+- DeviceNetworkEvents  
 
-### 1. ZIP Archive Activity Identified
-A search of file activity logs revealed repeated creation of `.zip` files on the endpoint, consistent with bulk data archiving behavior.
+---
+
+## 🕒 Timeline Summary & Findings
+
+### 1️⃣ ZIP Archive Creation Activity
+A review of file activity logs revealed repeated creation of `.zip` files on the endpoint, consistent with bulk data archiving behavior.
 
 ```kql
 DeviceFileEvents
@@ -30,11 +36,14 @@ DeviceFileEvents
 | where FileName endswith ".zip"
 | order by Timestamp desc
 ```
+<img width="1512" height="499" alt="Screenshot 2026-01-31 114541" src="https://github.com/user-attachments/assets/fa0ae4b9-1b1e-4a70-aab7-86e2b8a53131" />
 
-2. Process Correlation Around Archive Creation
+---
 
-Using the timestamp of a ZIP file creation event, process activity was analyzed within a ±2 minute window. This revealed a PowerShell script that silently installed 7-Zip and immediately used it to compress employee data.
-```
+### 2️⃣ Process Activity Correlation (±2 Minutes)
+Using the timestamp of a ZIP file creation event, process execution was reviewed within a two-minute window before and after the event.
+
+```kql
 let VMName = "vm-mde";
 let specificTime = datetime(2026-01-31T14:57:24.3368002Z);
 DeviceProcessEvents
@@ -43,91 +52,72 @@ DeviceProcessEvents
 | order by Timestamp desc
 | project Timestamp, DeviceName, ActionType, FileName, ProcessCommandLine
 ```
-Key Observations
+<img width="1496" height="631" alt="Screenshot 2026-01-31 114333" src="https://github.com/user-attachments/assets/1d557f5b-fd73-4c6e-ba98-6e64572b1595" />
 
-    PowerShell executed with bypassed execution policy
+**Key Observations**
+- PowerShell executed with bypassed execution policy  
+- 7-Zip was silently installed  
+- ZIP archives were created immediately after installation  
+- Behavior occurred at regular intervals  
 
-    7-Zip installed silently
+---
 
-    Archive creation occurred immediately after installation
+### 3️⃣ Network Activity Review
+Network telemetry was reviewed around the same time window.  
+**No evidence of outbound data exfiltration** was observed during the investigation period.
 
-    Activity repeated at regular intervals
+---
 
-3. Network Activity Review
-
-Network events were reviewed around the same time window. No evidence of outbound data transfer or exfiltration was observed during the investigation period.
-Assessment
-
-    Confirmed: Data staging via scripted ZIP archive creation
-
-    Not Confirmed: External data exfiltration
-
-    Risk Level: Medium (Insider threat preparation behavior)
-
-The activity strongly suggests pre-exfiltration staging, but no network indicators supported actual data theft at this time.
-MITRE ATT&CK Mapping
-
-Response:
-I relayed the information to the employee’s manager, including everything with the archives being created at
-regular intervals via PowerShell script. There didn’t appear to be any evidence of exfiltration. Standing by for
-further instructions from management.
-Potential alert rule
-```
-DeviceFileEvents
-| where FileName endswith ".zip"
-| summarize ZipFileActivity = count() by RequestAccountName
-| where ZipFileActivity > 50
-```
-## MITRE ATT&CK Framework Mapping
+## 🛡️ MITRE ATT&CK Framework Mapping
 
 - **T1059.001 – Command and Scripting Interpreter: PowerShell**  
-  PowerShell was used to silently install 7-Zip and execute archive creation, indicating potential malicious script-based activity.
+  PowerShell was used to silently install 7-Zip and execute archive creation.
 
 - **T1560.001 – Archive Collected Data: Archive via Utility**  
-  7-Zip was leveraged to compress employee data into ZIP archives, consistent with data staging prior to possible exfiltration.
+  7-Zip was used to compress data into ZIP archives, consistent with data staging behavior.
 
 - **T1070.004 – Indicator Removal on Host: File Deletion**  
-  Repeated archiving and backup behavior may indicate an attempt to obscure activity or stage data while minimizing detection.
+  Repeated archiving and backup behavior may indicate an attempt to obscure activity.
 
 - **T1105 – Ingress Tool Transfer**  
-  The silent installation of 7-Zip suggests the transfer and execution of a tool onto the endpoint.
+  Silent installation of 7-Zip demonstrates tool transfer to the endpoint.
 
 - **T1055.011 – Process Injection: Extra Window Memory Injection**  
-  While no direct evidence of injection was observed, PowerShell-based silent execution can be associated with injection-style execution techniques.
+  While not directly observed, PowerShell-based silent execution can overlap with injection-style techniques.
 
 - **T1027 – Obfuscated Files or Information**  
-  Scripted installation and execution of utilities may be used to mask malicious intent and evade detection mechanisms.
+  Scripted execution and silent utility usage may reduce visibility of malicious activity.
 
 - **T1047 – Windows Management Instrumentation**  
-  Although not explicitly confirmed, silent installations and scripted execution on Windows systems are commonly associated with WMI-based automation.
+  Silent installations and automated execution are commonly associated with WMI-based techniques.
 
-Response Actions
+---
 
-  -Findings escalated to management
-  
-  -Employee activity documented
-  
-  -Continued monitoring recommended
-  
-  -No immediate containment required due to lack of confirmed exfiltration
+## 🚨 Detection Improvement
 
-Detection Improvement
-Potential Alert Rule
-```
+### Potential Alert Rule – Bulk ZIP Creation
+```kql
 DeviceFileEvents
 | where FileName endswith ".zip"
 | summarize ZipFileActivity = count() by RequestAccountName
 | where ZipFileActivity > 50
 ```
-This detection can help identify abnormal bulk archiving behavior indicative of insider threat activity.
-Skills Demonstrated
 
-    Microsoft Defender for Endpoint (Advanced Hunting)
+This detection may help identify abnormal bulk archiving activity related to insider threat behavior.
 
-    Insider threat investigation
+---
 
-    KQL correlation across file, process, and network telemetry
+## 🧾 Final Assessment
+- **Confirmed:** Data staging via scripted archive creation  
+- **Not Confirmed:** Data exfiltration  
+- **Risk Level:** Medium  
+- **Recommendation:** Continued monitoring and alert tuning  
 
-    MITRE ATT&CK TTP mapping
+---
 
-    Incident documentation and reporting****
+## 🚀 Skills Demonstrated
+- Microsoft Defender for Endpoint Advanced Hunting  
+- KQL query development and pivoting  
+- Insider threat investigation  
+- MITRE ATT&CK TTP mapping  
+- Incident documentation and reporting  
